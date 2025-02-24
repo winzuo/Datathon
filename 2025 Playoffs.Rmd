@@ -1,0 +1,324 @@
+---
+title: "Future Simulation"
+output: pdf_document
+date: "2025-02-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+set.seed(21)
+future_games <- read.csv("Future.csv")
+keeps <- c("Date", "Visitor.Neutral", "PTS", "Home.Neutral", "PTS.1")
+future_games <- future_games[keeps]
+
+latest_elo <- final_team_elo
+
+get_final_elo <- function(df, team_name) {
+  # Check if the team exists in the dataframe
+  result <- df[df$Team == team_name, "Final_Elo"]
+  return(result$Final_Elo[1])
+}
+
+future_games$Home_Elo <- NA
+future_games$Away_Elo <- NA
+future_games$Home_Win_Prob <- NA
+future_games$Away_Win_Prob <- NA
+future_games$Predicted_Winner <- NA
+future_games$New_Home_Elo <- NA
+future_games$New_Away_Elo <- NA
+
+k_value <- 20
+
+for (i in 1:nrow(future_games)) {
+  home_team <- future_games$Home.Neutral[i]
+  away_team <- future_games$Visitor.Neutral[i]
+  
+  future_games$Home_Elo[i] <- get_final_elo(latest_elo, home_team)
+  future_games$Away_Elo[i] <- get_final_elo(latest_elo, away_team)
+  
+  win_prob <- elo.prob(future_games$Home_Elo[i], future_games$Away_Elo[i])
+  future_games$Home_Win_Prob[i] <- win_prob
+  future_games$Away_Win_Prob[i] <- 1 - win_prob
+  
+  home_win <- runif(1) < win_prob
+  future_games$Predicted_Winner[i] <- ifelse(home_win, home_team, away_team)
+  
+  result1 <- as.integer(home_win)
+  updated_elo <- elo.update(result1, future_games$Home_Elo[i], future_games$Away_Elo[i], k = k_value)
+  
+  # Assign new Elo ratings after the game
+  future_games$New_Home_Elo[i] <- future_games$Home_Elo[i] + updated_elo
+  future_games$New_Away_Elo[i] <- future_games$Away_Elo[i] - updated_elo
+  
+  # Update the team's Elo for their next game
+  team_index <- which(latest_elo$Team == home_team)
+  latest_elo$Final_Elo[team_index] <- future_games$New_Home_Elo[i]
+
+  team_index <- which(latest_elo$Team == away_team)
+  latest_elo$Final_Elo[team_index] <- future_games$New_Away_Elo[i]
+}
+```
+
+```{r}
+winner_counts <- future_games %>%
+  group_by(Predicted_Winner) %>%
+  summarise(Win_Count = n()) %>%
+  arrange(desc(Win_Count))
+
+winner_counts
+```
+
+```{r}
+# Filter for games since October 22, 2024
+recent_wins <- rolling %>%
+  filter(Date >= as.Date("2024-10-22")) %>%
+  group_by(Winner) %>%
+  summarise(Actual_Win_Count = n()) %>%
+  arrange(desc(Actual_Win_Count))
+
+east_teams <- c("Atlanta Hawks", "Boston Celtics", "Brooklyn Nets", "Charlotte Hornets", 
+                "Chicago Bulls", "Cleveland Cavaliers", "Detroit Pistons", "Indiana Pacers",
+                "Miami Heat", "Milwaukee Bucks", "New York Knicks", "Orlando Magic", 
+                "Philadelphia 76ers", "Toronto Raptors", "Washington Wizards")
+
+west_teams <- c("Dallas Mavericks", "Denver Nuggets", "Golden State Warriors", "Houston Rockets","Los Angeles Clippers", "Los Angeles Lakers", "Memphis Grizzlies", "Minnesota Timberwolves","New Orleans Pelicans", "Oklahoma City Thunder", "Phoenix Suns", "Portland Trail Blazers", "Sacramento Kings", "San Antonio Spurs", "Utah Jazz")
+
+# Add a column for conference in the combined_wins dataframe
+
+# Merge with predicted winner counts
+combined_wins <- winner_counts %>%
+  full_join(recent_wins, by = c("Predicted_Winner" = "Winner")) %>%
+  replace_na(list(Win_Count = 0, Actual_Win_Count = 0))
+
+combined_wins <- combined_wins %>%
+  mutate(Conference = case_when(
+    Predicted_Winner %in% east_teams ~ "East",
+    Predicted_Winner %in% west_teams ~ "West",
+    TRUE ~ "Unknown"
+  ))
+
+combined_wins$total_wins <- combined_wins$Win_Count + combined_wins$Actual_Win_Count
+combined_wins$win_percentage <- combined_wins$total_wins / 82
+
+# View the combined dataframe
+keeps2 <- c("Predicted_Winner", "Conference", "total_wins", "win_percentage")
+combined_wins <- combined_wins[keeps2]
+east_wins <- filter(combined_wins, Conference == "East")
+west_wins <- filter(combined_wins, Conference == "West")
+```
+
+```{r}
+print(east_wins[order(east_wins$win_percentage, decreasing = TRUE), ]   )
+```
+
+```{r}
+print(west_wins[order(west_wins$win_percentage, decreasing = TRUE), ]   )
+```
+
+```{r}
+Team <- c(
+  "Cleveland Cavaliers", "Boston Celtics", "New York Knicks", "Indiana Pacers",
+  "Detroit Pistons", "Milwaukee Bucks", "Miami Heat", "Orlando Magic",
+  "Oklahoma City Thunder", "Los Angeles Lakers", "Denver Nuggets", "Memphis Grizzlies",
+  "Houston Rockets", "Los Angeles Clippers", "Minnesota Timberwolves", "Golden State Warriors")
+elos[1] <- get_final_elo(latest_elo, teams[1])
+elos[2] <- get_final_elo(latest_elo, teams[2])
+elos[3] <- get_final_elo(latest_elo, teams[3])
+elos[4] <- get_final_elo(latest_elo, teams[4])
+elos[5] <- get_final_elo(latest_elo, teams[5])
+elos[6] <- get_final_elo(latest_elo, teams[6])
+elos[7] <- get_final_elo(latest_elo, teams[7])
+elos[8] <- get_final_elo(latest_elo, teams[8])
+elos[9] <- get_final_elo(latest_elo, teams[9])
+elos[10] <- get_final_elo(latest_elo, teams[10])
+elos[11] <- get_final_elo(latest_elo, teams[11])
+elos[12] <- get_final_elo(latest_elo, teams[12])
+elos[13] <- get_final_elo(latest_elo, teams[13])
+elos[14] <- get_final_elo(latest_elo, teams[14])
+elos[15] <- get_final_elo(latest_elo, teams[15])
+elos[16] <- get_final_elo(latest_elo, teams[16])
+teams_elo <- data.frame(cbind(Team, elos))
+teams_elo
+
+get_final_elo2 <- function(df, team_name) {
+  # Check if the team exists in the dataframe
+  result <- df[df$Team == team_name, "elos"]
+  as.numeric(result)
+  return(result)
+}
+```
+
+
+```{r}
+run_simulation <- function(sim_number) {
+  simulate_series <- function(home_elo, away_elo) {
+  home_wins <- 0
+  away_wins <- 0
+  while (home_wins < 4 && away_wins < 4) {
+    win_prob <- elo.prob(home_elo, away_elo)
+    if (runif(1) < win_prob) {
+      home_wins <- home_wins + 1
+    } else {
+      away_wins <- away_wins + 1
+    }
+  }
+  if (home_wins == 4) {
+    return(list(winner = "Home", home_elo = home_elo, away_elo = away_elo))
+  }
+  else {
+    return(list(winner = "Away", home_elo = home_elo, away_elo = away_elo))
+  }
+}
+
+# First Round Matchups
+matchups_east <- list(
+  c("Cleveland Cavaliers", "Orlando Magic"),
+  c("Boston Celtics", "Miami Heat"),
+  c("New York Knicks", "Milwaukee Bucks"),
+  c("Indiana Pacers", "Detroit Pistons")
+)
+
+matchups_west <- list(
+  c("Oklahoma City Thunder", "Golden State Warriors"),
+  c("Los Angeles Lakers", "Minnesota Timberwolves"),
+  c("Denver Nuggets", "Los Angeles Clippers"),
+  c("Memphis Grizzlies", "Houston Rockets")
+)
+
+# Simulate the first round
+matchup_teams <- c()
+simulate_round <- function(matchups) {
+  winners <- character(length(matchups))
+  for (i in seq_along(matchups)) {
+    matchup_teams <- matchups[[i]]
+    Home_Playoff_Elo <- as.numeric(get_final_elo2(teams_elo, matchup_teams[1]))
+    Away_Playoff_Elo <- as.numeric(get_final_elo2(teams_elo, matchup_teams[2]))
+    result <- simulate_series(Home_Playoff_Elo, Away_Playoff_Elo)
+    if (result$winner == "Home") {
+      winner <- matchup_teams[1]
+      }
+    else {
+      winner <- matchup_teams[2]
+    }
+    winners[i] <- winner
+  }
+  return(winners)
+}
+
+east_winners <- simulate_round(matchups_east)
+west_winners <- simulate_round(matchups_west)
+
+east_matchups_round2 <- list(
+  c(east_winners[1], east_winners[4]),
+  c(east_winners[2], east_winners[3])
+)
+
+west_matchups_round2 <- list(
+  c(west_winners[1], west_winners[4]),
+  c(west_winners[2], west_winners[3])
+)
+
+east_finalists <- simulate_round(east_matchups_round2)
+
+west_finalists <- simulate_round(west_matchups_round2)
+
+# Simulate Conference Finals
+final_east_winner <- {
+  result <- simulate_series(east_finalists[1], east_finalists[2])
+  if (result$winner == "Home") east_finalists[1] else east_finalists[2]
+}
+
+final_west_winner <- {
+  result <- simulate_series(west_finalists[1], west_finalists[2])
+  if (result$winner == "Home") west_finalists[1] else west_finalists[2]
+}
+
+# Simulate NBA Finals
+nba_champion <- {
+  result <- simulate_series(final_east_winner, final_west_winner)
+  if (result$winner == "Home") final_east_winner else final_west_winner
+}
+new_winner <- data.frame(
+    Simulation = sim_number,
+    ECF_Champion = final_east_winner,
+    WCF_Champion = final_west_winner,
+    NBA_Champion = nba_champion,
+    stringsAsFactors = FALSE)
+  
+winners <<- rbind(winners, new_winner)
+}
+
+  
+for (i in 1:1000) {
+  run_simulation(i)
+}
+```
+
+```{r}
+winners <- data.frame(
+  Simulation = integer(),
+  ECF_Champion = character(),
+  WCF_Champion = character(),
+  NBA_Champion = character(),
+  stringsAsFactors = FALSE
+)
+```
+
+```{r}
+winners
+```
+
+```{r}
+ggplot(winners, aes(x = NBA_Champion)) +
+  geom_bar() +
+  labs(title = "NBA Champions", x = "NBA Champion", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+```
+
+
+```{r}
+teams_elo
+```
+
+```{r}
+runif(1)
+```
+
+
+```{r}
+# Set up a vector to store the winners of each series
+winners3 <- data.frame()
+
+# Run the simulation for 100 series
+for (i in 1:100) {
+  east_winners <- simulate_round(matchups_east)
+  winners3 <- rbind(winners3, east_winners)
+}
+```
+
+```{r}
+winners3
+```
+
+```{r}
+Home_Playoff_Elo <- as.numeric(get_final_elo2(teams_elo, "Boston Celtics"))
+Away_Playoff_Elo <- as.numeric(get_final_elo2(teams_elo, "Miami Heat"))
+    
+winners2 <- vector("character", 100)
+
+# Run the simulation for 100 series
+for (i in 1:100) {
+  result <- simulate_series(Home_Playoff_Elo, Away_Playoff_Elo)
+  winners2[i] <- result$winner
+}
+
+winners2
+```
+
+```{r}
+Home_Playoff_Elo
+```
+

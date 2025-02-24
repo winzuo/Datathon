@@ -1,0 +1,410 @@
+---
+title: "Project"
+output: pdf_document
+date: "2025-02-22"
+---
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(tibble)
+```
+
+
+```{r}
+keeps <- c("Date", "Visitor.Neutral", "PTS", "Home.Neutral", "PTS.1")
+add_winner_column <- function(df) {
+  df$Winner <- ifelse(df$pointdifference > 0, 
+                      df$Home.Neutral,  # Home team wins if pointdifference > 0
+                      df$Visitor.Neutral)  # Visitor team wins if pointdifference < 0
+  return(df)
+}
+
+add_loser_column <- function(df) {
+  df$Loser <- ifelse(df$pointdifference > 0, 
+                      df$Visitor.Neutral,
+                      df$Home.Neutral)
+  return(df)
+}
+```
+
+```{r}
+rolling <- read.csv("Rolling.csv")
+rolling <- rolling[keeps]
+rolling <- rolling %>%
+  mutate(Date = as.Date(Date, format = "%a %b %d %Y"))
+rolling$pointdifference <- rolling$PTS.1 - rolling$PTS
+rolling <- add_winner_column(rolling)
+rolling <- add_loser_column(rolling)
+team_name_replacements <- c(
+  "Washington Bullets" = "Washington Wizards",
+  "Vancouver Grizzlies" = "Memphis Grizzlies",
+  "New Orleans/Oklahoma City Hornets" = "New Orleans Pelicans",
+  "New Orleans Hornets" = "New Orleans Pelicans",
+  "Seattle SuperSonics" = "Oklahoma City Thunder",
+  "Charlotte Bobcats" = "Charlotte Hornets",
+  "New Jersey Nets" = "Brooklyn Nets")
+rolling <- rolling %>%
+  mutate(
+    across(
+      c(Home.Neutral, Visitor.Neutral, Winner),  # Replace in relevant columns
+      ~ recode(., !!!team_name_replacements)
+    )
+  )
+```
+
+
+```{r}
+rolling$Home_Elo <- NA
+rolling$Away_Elo <- NA
+
+unique_teams <- unique(c(rolling$Home.Neutral, rolling$Visitor.Neutral))
+elo_tracker <- setNames(rep(NA, length(unique_teams)), unique_teams)
+
+for (i in 1:nrow(rolling)) {
+  home_team <- rolling$Home.Neutral[i]
+  away_team <- rolling$Visitor.Neutral[i]
+  
+  # Assign 1000 Elo rating for first occurrence
+  if (is.na(elo_tracker[home_team])) {
+    rolling$Home_Elo[i] <- 1000
+    elo_tracker[home_team] <- 1000
+  }
+  
+  if (is.na(elo_tracker[away_team])) {
+    rolling$Away_Elo[i] <- 1000
+    elo_tracker[away_team] <- 1000
+  }
+}
+
+rolling$Home_Winner <- ifelse(rolling$Winner == rolling$Home.Neutral, 1, 0)
+rolling$Away_Winner <- ifelse(rolling$Winner == rolling$Visitor.Neutral, 1, 0)
+```
+
+```{r}
+rolling$New_Home_Elo <- NA
+rolling$New_Away_Elo <- NA
+rolling$Home_Elo_Gain <- NA
+rolling$Away_Elo_Gain <- NA
+
+team_elo <- setNames(rep(1000, length(unique(c(rolling$Home.Neutral, rolling$Visitor.Neutral)))), 
+                     unique(c(rolling$Home.Neutral, rolling$Visitor.Neutral)))
+
+k_value <- 20
+
+for (i in 1:nrow(rolling)) {
+  home_team <- rolling$Home.Neutral[i]
+  away_team <- rolling$Visitor.Neutral[i]
+  
+  # Assign current Elo ratings
+  rolling$Home_Elo[i] <- team_elo[home_team]
+  rolling$Away_Elo[i] <- team_elo[away_team]
+  
+  # Update Elo ratings using elo.update()
+  result <- rolling$Home_Winner[i]  # 1 if home wins, 0 if away wins
+  updated_elo <- elo.update(result, rolling$Home_Elo[i], rolling$Away_Elo[i], k = k_value)
+  
+  # Assign new Elo ratings after the game
+  rolling$Home_Elo_Gain[i] <- round(updated_elo, 3)
+  rolling$Away_Elo_Gain[i] <- -(round(updated_elo, 3))
+  rolling$New_Home_Elo[i] <- team_elo[home_team] + updated_elo
+  rolling$New_Away_Elo[i] <- team_elo[away_team] - updated_elo
+  
+  # Update the team's Elo for their next game
+  team_elo[home_team] <- team_elo[home_team] + updated_elo
+  team_elo[away_team] <- team_elo[away_team] - updated_elo
+}
+```
+
+```{r}
+library(dplyr)
+
+final_home_elo <- rolling %>%
+  group_by(Home.Neutral) %>%
+  filter(row_number() == max(row_number())) %>%
+  select(Team = Home.Neutral, Final_Elo = New_Home_Elo)
+
+final_away_elo <- rolling %>%
+  group_by(Visitor.Neutral) %>%
+  filter(row_number() == max(row_number())) %>%
+  select(Team = Visitor.Neutral, Final_Elo = New_Away_Elo)
+
+final_team_elo <- bind_rows(final_home_elo, final_away_elo) %>%
+  group_by(Team) %>%
+  filter(row_number() == max(row_number())) %>%
+  ungroup()
+
+print(final_team_elo[order(final_team_elo$Final_Elo, decreasing = TRUE), ]   )
+```
+
+```{r}
+home_elo_max <- rolling %>%
+  group_by(Home.Neutral) %>%
+  summarise(Max_Elo = max(New_Home_Elo, na.rm = TRUE),
+            Date = Date[which.max(New_Home_Elo)]) %>%
+  rename(Team = Home.Neutral)
+
+away_elo_max <- rolling %>%
+  group_by(Visitor.Neutral) %>%
+  summarise(Max_Elo = max(New_Away_Elo, na.rm = TRUE),
+            Date = Date[which.max(New_Away_Elo)]) %>%
+  rename(Team = Visitor.Neutral)
+
+# Combine both to get the overall highest Elo for each team
+highest_elo <- bind_rows(home_elo_max, away_elo_max) %>%
+  group_by(Team) %>%
+  summarise(Max_Elo = max(Max_Elo, na.rm = TRUE),
+            Date = Date[which.max(Max_Elo)]) %>%
+  arrange(desc(Max_Elo))
+
+highest_elo
+top_elo <- highest_elo[1:10, ]
+```
+
+```{r}
+nba_2021_2024 <- read.csv("2021-2024.csv")
+nba_2021_2024 <- nba_2021_2024[keeps]
+nba_2021_2024$pointdifference <- nba_2021_2024$PTS.1 - nba_2021_2024$PTS
+nba_2021_2024 <- add_winner_column(nba_2021_2024)
+nba_2021_2024 <- add_loser_column(nba_2021_2024)
+nba_2021_2024$Home_Elo <- NA
+nba_2021_2024$Away_Elo <- NA
+
+unique_teams <- unique(c(nba_2021_2024$Home.Neutral, nba_2021_2024$Visitor.Neutral))
+elo_tracker <- setNames(rep(NA, length(unique_teams)), unique_teams)
+
+for (i in 1:nrow(nba_2021_2024)) {
+  home_team <- nba_2021_2024$Home.Neutral[i]
+  away_team <- nba_2021_2024$Visitor.Neutral[i]
+  
+  # Assign 1000 Elo rating for first occurrence
+  if (is.na(elo_tracker[home_team])) {
+    nba_2021_2024$Home_Elo[i] <- 1000
+    elo_tracker[home_team] <- 1000
+  }
+  
+  if (is.na(elo_tracker[away_team])) {
+    nba_2021_2024$Away_Elo[i] <- 1000
+    elo_tracker[away_team] <- 1000
+  }
+}
+
+nba_2021_2024$Home_Winner <- ifelse(nba_2021_2024$Winner == nba_2021_2024$Home.Neutral, 1, 0)
+nba_2021_2024$Away_Winner <- ifelse(nba_2021_2024$Winner == nba_2021_2024$Visitor.Neutral, 1, 0)
+
+nba_2021_2024$New_Home_Elo <- NA
+nba_2021_2024$New_Away_Elo <- NA
+nba_2021_2024$Home_Elo_Gain <- NA
+nba_2021_2024$Away_Elo_Gain <- NA
+
+team_elo <- setNames(rep(1000, length(unique(c(nba_2021_2024$Home.Neutral, nba_2021_2024$Visitor.Neutral)))), 
+                     unique(c(nba_2021_2024$Home.Neutral, nba_2021_2024$Visitor.Neutral)))
+
+k_value <- 50
+
+for (i in 1:nrow(nba_2021_2024)) {
+  home_team <- nba_2021_2024$Home.Neutral[i]
+  away_team <- nba_2021_2024$Visitor.Neutral[i]
+  
+  # Assign current Elo ratings
+  nba_2021_2024$Home_Elo[i] <- team_elo[home_team]
+  nba_2021_2024$Away_Elo[i] <- team_elo[away_team]
+  
+  # Update Elo ratings using elo.update()
+  result <- nba_2021_2024$Home_Winner[i]  # 1 if home wins, 0 if away wins
+  updated_elo <- elo.update(result, nba_2021_2024$Home_Elo[i], nba_2021_2024$Away_Elo[i], k = k_value)
+  
+  # Assign new Elo ratings after the game
+  nba_2021_2024$Home_Elo_Gain[i] <- round(updated_elo, 3)
+  nba_2021_2024$Away_Elo_Gain[i] <- -(round(updated_elo, 3))
+  nba_2021_2024$New_Home_Elo[i] <- team_elo[home_team] + updated_elo
+  nba_2021_2024$New_Away_Elo[i] <- team_elo[away_team] - updated_elo
+  
+  # Update the team's Elo for their next game
+  team_elo[home_team] <- team_elo[home_team] + updated_elo
+  team_elo[away_team] <- team_elo[away_team] - updated_elo
+}
+```
+
+```{r}
+nba_2021_2024
+```
+
+```{r}
+final_home_elo2 <- nba_2021_2024 %>%
+  group_by(Home.Neutral) %>%
+  filter(row_number() == max(row_number())) %>%
+  select(Team = Home.Neutral, Final_Elo = New_Home_Elo)
+
+final_away_elo2 <- nba_2021_2024 %>%
+  group_by(Visitor.Neutral) %>%
+  filter(row_number() == max(row_number())) %>%
+  select(Team = Visitor.Neutral, Final_Elo = New_Away_Elo)
+
+final_team_elo2 <- bind_rows(final_home_elo2, final_away_elo2) %>%
+  group_by(Team) %>%
+  filter(row_number() == max(row_number())) %>%
+  ungroup()
+
+print(final_team_elo2[order(final_team_elo2$Final_Elo, decreasing = TRUE), ]   )
+```
+
+```{r}
+home_elo_max2 <- nba_2021_2024 %>%
+  group_by(Home.Neutral) %>%
+  summarise(Max_Elo = max(New_Home_Elo, na.rm = TRUE),
+            Date = Date[which.max(New_Home_Elo)]) %>%
+  rename(Team = Home.Neutral)
+
+away_elo_max2 <- nba_2021_2024 %>%
+  group_by(Visitor.Neutral) %>%
+  summarise(Max_Elo = max(New_Away_Elo, na.rm = TRUE),
+            Date = Date[which.max(New_Away_Elo)]) %>%
+  rename(Team = Visitor.Neutral)
+
+# Combine both to get the overall highest Elo for each team
+highest_elo2 <- bind_rows(home_elo_max2, away_elo_max2) %>%
+  group_by(Team) %>%
+  summarise(Max_Elo = max(Max_Elo, na.rm = TRUE),
+            Date = Date[which.max(Max_Elo)]) %>%
+  arrange(desc(Max_Elo))
+
+highest_elo2
+
+```
+
+```{r}
+home_elo_min <- nba_2021_2024 %>%
+  group_by(Home.Neutral) %>%
+  summarise(Min_Elo = min(New_Home_Elo, na.rm = TRUE),
+            Date = Date[which.min(New_Home_Elo)]) %>%
+  rename(Team = Home.Neutral)
+
+away_elo_min <- nba_2021_2024 %>%
+  group_by(Visitor.Neutral) %>%
+  summarise(Min_Elo = min(New_Away_Elo, na.rm = TRUE),
+            Date = Date[which.min(New_Away_Elo)]) %>%
+  rename(Team = Visitor.Neutral)
+
+# Combine both to get the overall highest Elo for each team
+lowest_elo <- bind_rows(home_elo_min, away_elo_min) %>%
+  group_by(Team) %>%
+  summarise(Min_Elo = min(Min_Elo, na.rm = TRUE),
+            Date = Date[which.min(Min_Elo)]) %>%
+  arrange((Min_Elo))
+
+lowest_elo
+```
+
+```{r}
+Bulls <- filter(rolling, (Home.Neutral == "Chicago Bulls" | Visitor.Neutral == "Chicago Bulls"))
+Bulls <- Bulls %>%
+  mutate(
+    Team_Elo = ifelse(Home.Neutral == "Chicago Bulls", New_Home_Elo, New_Away_Elo),
+  ) %>%
+  arrange(Date)
+Bulls <- filter(Bulls, (Date >= as.Date("1990-01-01") & Date <= as.Date("2000-12-31")))
+```
+
+```{r}
+Bulls_elo_ts <- ts(Bulls$Team_Elo, start = c(as.numeric(format(min(as.Date(Bulls$Date)), "%Y"))), frequency = 82) 
+plot.ts(Bulls_elo_ts, col = "#ce1141", lwd = 2, main = "Chicago Bulls' Elo Ratings during Jordan Era", ylab = "Elo Rating", xlab = "Year", axes = )
+
+
+```
+
+```{r}
+Cavs <- filter(rolling, (Home.Neutral == "Cleveland Cavaliers" | Visitor.Neutral == "Cleveland Cavaliers"))
+Cavs <- Cavs %>%
+  mutate(
+    Team_Elo = ifelse(Home.Neutral == "Cleveland Cavaliers", New_Home_Elo, New_Away_Elo),
+  ) %>%
+  arrange(Date)
+Cavs <- filter(Cavs, (Date >= as.Date("2000-01-01") & Date <= as.Date("2020-12-31")))
+```
+
+
+```{r}
+Cavs_elo_ts <- ts(Cavs$Team_Elo, start = c(as.numeric(format(min(as.Date(Cavs$Date)), "%Y"))), frequency = 82) 
+plot.ts(Cavs_elo_ts, col = "#860038", lwd = 2, main = "Cleveland Cavaliers' Elo Ratings during LeBron Era", 
+        ylab = "Elo Rating", xlab = "Year")
+
+```
+
+
+
+```{r}
+team_elo_home <- rolling %>% 
+  select(Game_Date = Date, Team = Home.Neutral, Elo = New_Home_Elo)
+team_elo_away <- rolling %>% 
+  select(Game_Date = Date, Team = Visitor.Neutral, Elo = New_Away_Elo)
+  
+team_elo <- bind_rows(team_elo_home, team_elo_away) %>% 
+  arrange(Team, Game_Date)
+
+get_best_4yr_window <- function(df) {
+  # Ensure data is sorted by Game_Date
+  df <- df %>% arrange(Game_Date)
+  
+  # If the group is empty, return NA values.
+  if(nrow(df) == 0){
+    return(tibble(
+      Team = NA_character_,
+      Best_Avg_Elo = NA_real_,
+      Start_Date = as.Date(NA),
+      End_Date = as.Date(NA)
+    ))
+  }
+  
+  best_avg <- -Inf
+  best_start <- as.Date(NA)
+  best_end <- as.Date(NA)
+  
+  # Get the unique game dates to consider as potential window start dates.
+  unique_dates <- unique(df$Game_Date)
+  
+  for(start_date in unique_dates){
+    # Define the end of a 4-year window (inclusive)
+    end_date <- start_date + years(4)
+    
+    # Subset the data for games within this 4-year window.
+    window_df <- df %>% filter(Game_Date >= start_date, Game_Date <= end_date)
+    
+    if(nrow(window_df) > 0){
+      current_avg <- mean(window_df$Elo, na.rm = TRUE)
+      if(current_avg > best_avg){
+        best_avg <- current_avg
+        best_start <- start_date
+        best_end <- max(window_df$Game_Date)
+      }
+    }
+  }
+  
+  # Return a tibble (each column has length 1)
+  tibble(
+    Team = df$Team[1],
+    Best_Avg_Elo = best_avg,
+    Start_Date = as_date(best_start),
+    End_Date = best_end
+  )
+}
+
+best_stretches <- team_elo %>%
+  group_by(Team) %>%
+  group_modify(~ get_best_4yr_window(.x)) %>%
+  ungroup()
+
+# Display the best 4-year window for each team
+print(best_stretches)
+```
+
+```{r}
+ggplot(top_elo, aes(x = Team, y = Max_Elo, fill = Team)) + geom_bar(stat = "identity") + scale_fill_manual(values = team_colors) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+install.packages()
+```
+

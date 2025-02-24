@@ -1,0 +1,177 @@
+---
+title: "Untitled"
+output: pdf_document
+date: "2025-02-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+Team2 <- c(
+  "Boston Celtics", "New York Knicks", "Milwaukee Bucks", "Cleveland Cavaliers",
+  "Orlando Magic", "Indiana Pacers", "Philadelphia 76ers", "Miami Heat",
+  "Oklahoma City Thunder", "Denver Nuggets", "Minnesota Timberwolves", "Los Angeles Clippers",
+  "Dallas Mavericks", "Phoenix Suns", "Los Angeles Lakers", "New Orleans Pelicans")
+elos2 <- c()
+elos2[1] <- 1220.0
+elos2[2] <- 1146.0
+elos2[3] <- 1023.0
+elos2[4] <- 1014.0
+elos2[5] <- 1002.0
+elos2[6] <- 1105.0
+elos2[7] <- 1091.0
+elos2[8] <- 1070.0
+elos2[9] <- 1167.0
+elos2[10] <- 1181.0
+elos2[11] <- 1140.0
+elos2[12] <- 1074.0
+elos2[13] <- 1209.0
+elos2[14] <- 1178.0
+elos2[15] <- 1157.0
+elos2[16] <- 1112.0
+teams_elo2 <- data.frame(cbind(Team2, elos2))
+teams_elo2
+
+get_final_elo3 <- function(df, team_name) {
+  # Check if the team exists in the dataframe
+  result <- df[df$Team2 == team_name, "elos2"]
+  as.numeric(result)
+  return(result)
+}
+```
+
+
+```{r}
+run_simulation <- function(sim_number) {
+  simulate_series <- function(home_elo, away_elo) {
+  home_wins <- 0
+  away_wins <- 0
+  while (home_wins < 4 && away_wins < 4) {
+    win_prob <- elo.prob(home_elo, away_elo)
+    if (runif(1) < win_prob) {
+      home_wins <- home_wins + 1
+    } else {
+      away_wins <- away_wins + 1
+    }
+  }
+  if (home_wins == 4) {
+    return(list(winner = "Home", home_elo = home_elo, away_elo = away_elo))
+  }
+  else {
+    return(list(winner = "Away", home_elo = home_elo, away_elo = away_elo))
+  }
+}
+
+# First Round Matchups
+matchups_east <- list(
+  c("Boston Celtics", "Miami Heat"),
+  c("New York Knicks", "Philadelphia 76ers"),
+  c("Milwaukee Bucks", "Indiana Pacers"),
+  c("Cleveland Cavaliers", "Orlando Magic")
+)
+
+matchups_west <- list(
+  c("Oklahoma City Thunder", "New Orleans Pelicans"),
+  c("Denver Nuggets", "Los Angeles Lakers"),
+  c("Minnesota Timberwolves", "Phoenix Suns"),
+  c("Los Angeles Clippers", "Dallas Mavericks")
+)
+
+# Simulate the first round
+matchup_teams <- c()
+
+simulate_round <- function(matchups) {
+  winners <- character(length(matchups))
+  for (i in seq_along(matchups)) {
+    matchup_teams <- matchups[[i]]
+    Home_Playoff_Elo <- as.numeric(get_final_elo3(teams_elo2, matchup_teams[1]))
+    Away_Playoff_Elo <- as.numeric(get_final_elo3(teams_elo2, matchup_teams[2]))
+    result <- simulate_series(Home_Playoff_Elo, Away_Playoff_Elo)
+    if (result$winner == "Home") {
+      winner <- matchup_teams[1]
+      }
+    else {
+      winner <- matchup_teams[2]
+    }
+    winners[i] <- winner
+  }
+  return(winners)
+}
+
+east_winners <- simulate_round(matchups_east)
+west_winners <- simulate_round(matchups_west)
+
+east_matchups_round2 <- list(
+  c(east_winners[1], east_winners[4]),
+  c(east_winners[2], east_winners[3])
+)
+
+west_matchups_round2 <- list(
+  c(west_winners[1], west_winners[4]),
+  c(west_winners[2], west_winners[3])
+)
+
+east_finalists <- simulate_round(east_matchups_round2)
+
+west_finalists <- simulate_round(west_matchups_round2)
+
+# Simulate Conference Finals
+final_east_winner <- {
+  result <- simulate_series(east_finalists[1], east_finalists[2])
+  if (result$winner == "Home") east_finalists[1] else east_finalists[2]
+}
+
+final_west_winner <- {
+  result <- simulate_series(west_finalists[1], west_finalists[2])
+  if (result$winner == "Home") west_finalists[1] else west_finalists[2]
+}
+
+# Simulate NBA Finals
+nba_champion <- {
+  result <- simulate_series(final_east_winner, final_west_winner)
+  if (result$winner == "Home") final_east_winner else final_west_winner
+}
+
+new_winner <- data.frame(
+    Simulation = sim_number,
+    ECF_Champion = final_east_winner,
+    WCF_Champion = final_west_winner,
+    NBA_Champion = nba_champion,
+    stringsAsFactors = FALSE
+  )
+  
+  winners2 <<- rbind(winners2, new_winner)
+}
+
+  
+for (i in 1:1000) {
+  run_simulation(i)
+}
+
+```
+
+```{r}
+winners2 <- data.frame(
+  Simulation = integer(),
+  ECF_Champion = character(),
+  WCF_Champion = character(),
+  NBA_Champion = character(),
+  stringsAsFactors = FALSE
+)
+```
+
+```{r}
+winners2
+```
+
+```{r}
+ggplot(winners2, aes(x = NBA_Champion)) +
+  geom_bar() +
+  labs(title = "NBA Champions", x = "NBA Champion", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+```
+
+
+

@@ -1,0 +1,179 @@
+---
+title: "2016-2020"
+output: pdf_document
+date: "2025-02-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+nba_2016_2020 <- read.csv("2016-2020.csv")
+nba_2016_2020 <- nba_2016_2020[keeps]
+nba_2016_2020$pointdifference <- nba_2016_2020$PTS.1 - nba_2016_2020$PTS
+nba_2016_2020 <- add_winner_column(nba_2016_2020)
+nba_2016_2020 <- add_loser_column(nba_2016_2020)
+nba_2016_2020$Home_Elo <- NA
+nba_2016_2020$Away_Elo <- NA
+
+unique_teams <- unique(c(nba_2016_2020$Home.Neutral, nba_2016_2020$Visitor.Neutral))
+elo_tracker <- setNames(rep(NA, length(unique_teams)), unique_teams)
+
+for (i in 1:nrow(nba_2016_2020)) {
+  home_team <- nba_2016_2020$Home.Neutral[i]
+  away_team <- nba_2016_2020$Visitor.Neutral[i]
+  
+  # Assign 1000 Elo rating for first occurrence
+  if (is.na(elo_tracker[home_team])) {
+    nba_2016_2020$Home_Elo[i] <- 1000
+    elo_tracker[home_team] <- 1000
+  }
+  
+  if (is.na(elo_tracker[away_team])) {
+    nba_2016_2020$Away_Elo[i] <- 1000
+    elo_tracker[away_team] <- 1000
+  }
+}
+
+nba_2016_2020$Home_Winner <- ifelse(nba_2016_2020$Winner == nba_2016_2020$Home.Neutral, 1, 0)
+nba_2016_2020$Away_Winner <- ifelse(nba_2016_2020$Winner == nba_2016_2020$Visitor.Neutral, 1, 0)
+
+nba_2016_2020$New_Home_Elo <- NA
+nba_2016_2020$New_Away_Elo <- NA
+nba_2016_2020$Home_Elo_Gain <- NA
+nba_2016_2020$Away_Elo_Gain <- NA
+
+team_elo <- setNames(rep(1000, length(unique(c(nba_2016_2020$Home.Neutral, nba_2016_2020$Visitor.Neutral)))), 
+                     unique(c(nba_2016_2020$Home.Neutral, nba_2016_2020$Visitor.Neutral)))
+
+k_value <- 50
+
+for (i in 1:nrow(nba_2016_2020)) {
+  home_team <- nba_2016_2020$Home.Neutral[i]
+  away_team <- nba_2016_2020$Visitor.Neutral[i]
+  
+  # Assign current Elo ratings
+  nba_2016_2020$Home_Elo[i] <- team_elo[home_team]
+  nba_2016_2020$Away_Elo[i] <- team_elo[away_team]
+  
+  # Update Elo ratings using elo.update()
+  result <- nba_2016_2020$Home_Winner[i]  # 1 if home wins, 0 if away wins
+  updated_elo <- elo.update(result, nba_2016_2020$Home_Elo[i], nba_2016_2020$Away_Elo[i], k = k_value)
+  
+  # Assign new Elo ratings after the game
+  nba_2016_2020$Home_Elo_Gain[i] <- round(updated_elo, 3)
+  nba_2016_2020$Away_Elo_Gain[i] <- -(round(updated_elo, 3))
+  nba_2016_2020$New_Home_Elo[i] <- team_elo[home_team] + updated_elo
+  nba_2016_2020$New_Away_Elo[i] <- team_elo[away_team] - updated_elo
+  
+  # Update the team's Elo for their next game
+  team_elo[home_team] <- team_elo[home_team] + updated_elo
+  team_elo[away_team] <- team_elo[away_team] - updated_elo
+}
+```
+
+```{r}
+home_elo_max3 <- nba_2016_2020 %>%
+  group_by(Home.Neutral) %>%
+  summarise(Max_Elo = max(New_Home_Elo, na.rm = TRUE),
+            Date = Date[which.max(New_Home_Elo)]) %>%
+  rename(Team = Home.Neutral)
+
+away_elo_max3 <- nba_2016_2020 %>%
+  group_by(Visitor.Neutral) %>%
+  summarise(Max_Elo = max(New_Away_Elo, na.rm = TRUE),
+            Date = Date[which.max(New_Away_Elo)]) %>%
+  rename(Team = Visitor.Neutral)
+
+# Combine both to get the overall highest Elo for each team
+highest_elo3 <- bind_rows(home_elo_max3, away_elo_max3) %>%
+  group_by(Team) %>%
+  summarise(Max_Elo = max(Max_Elo, na.rm = TRUE),
+            Date = Date[which.max(Max_Elo)]) %>%
+  arrange(desc(Max_Elo))
+
+highest_elo3
+```
+
+```{r}
+teams_to_plot <- c("Golden State Warriors", "Houston Rockets", 
+                   "Cleveland Cavaliers")
+
+nba_2016_2020 <- nba_2016_2020 %>%
+  mutate(Game_Date = as.Date(Date, format = "%a %b %d %Y"))
+
+# Create a dataset for home games for the selected teams
+elo_home <- nba_2016_2020 %>%
+  filter(Home.Neutral %in% teams_to_plot) %>%
+  mutate(
+    Team = Home.Neutral,
+    Elo = New_Home_Elo
+  ) %>%
+  select(Game_Date, Team, Elo)
+
+# Create a dataset for away games for the selected teams
+
+elo_data <- bind_rows(elo_home, elo_away) %>%
+  arrange(Game_Date)
+
+elo_away <- nba_2016_2020 %>%
+  filter(Visitor.Neutral %in% teams_to_plot) %>%
+  mutate(
+    Team = Visitor.Neutral,
+    Elo = New_Away_Elo
+  ) %>%
+  select(Game_Date, Team, Elo)
+
+# Combine home and away Elo records into one dataset
+elo_data <- elo_data %>%
+  arrange(Team, Game_Date) %>%
+  group_by(Team) %>%
+  # Compute a rolling average of Elo with a window of 5 games.
+  mutate(rolling_Elo = rollmean(Elo, k = 5, fill = NA, align = "right")) %>%
+  ungroup()
+
+# Plot Elo over time for each selected team using ggplot2
+ggplot(elo_data, aes(x = Game_Date, y = rolling_Elo, color = Team)) +
+  geom_line(size = 1) +
+  labs(title = "Rolling Average Elo Rating (5-game window)",
+       x = "Date", 
+       y = "Rolling Average Elo") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+```
+
+```{r}
+# Get a list of the teams you want to plot
+
+# Filter the data for those teams
+elo_subset <- elo_data %>% filter(Team %in% teams_to_plot)
+
+# Convert the date to numeric year for the time series start
+elo_subset$Year <- as.numeric(format(as.Date(elo_subset$Game_Date), "%Y"))
+
+# Get unique teams
+unique_teams <- unique(elo_subset$Team)
+
+# Set up colors for each team
+team_colors <- rainbow(length(unique_teams))
+
+# Initialize an empty plot
+plot(NA, xlim = range(elo_subset$Year), ylim = range(elo_subset$Elo, na.rm = TRUE),
+     xlab = "Year", ylab = "Elo Rating", main = "Elo Ratings Over Time for Selected Teams", lwd = 2)
+
+# Loop through each team and plot their time series
+for (i in seq_along(unique_teams)) {
+  team_data <- elo_subset %>% filter(Team == unique_teams[i])
+  team_ts <- ts(team_data$Elo, start = min(team_data$Year), frequency = 82)
+  lines(team_ts, col = team_colors[i], lwd = 2)
+}
+
+# Add a legend
+legend("topright", legend = unique_teams, col = team_colors, lwd = 2, cex = 0.8)
+
+```
+```{r}
+elo_data
+```
+
